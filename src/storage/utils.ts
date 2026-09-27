@@ -25,28 +25,30 @@ export const getData = <T>(key: string, defaultValue: T): T => {
   }
 };
 
+// Single persistent channel instance for the application lifecycle
+const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel('barberflow_sync_channel')
+  : null;
+
 export const setData = <T>(key: string, value: T): void => {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
-    // Dispatch a custom event so other components/hooks can listen to changes
+    const stringifiedValue = JSON.stringify(value);
+    localStorage.setItem(key, stringifiedValue);
+
+    // Notify current window
     window.dispatchEvent(new Event('storage-update'));
 
-    // Broadcast cross-browser/tab sync using BroadcastChannel
-    try {
-      const channel = new BroadcastChannel('barberflow_sync_channel');
-      channel.postMessage({ key, value });
-      channel.close();
-    } catch (bcError) {
-      console.error('BroadcastChannel error:', bcError);
+    // Notify other tabs/windows on this device
+    if (syncChannel) {
+      syncChannel.postMessage({ key, value });
     }
   } catch (error) {
     console.error(`Error setting localStorage key "${key}":`, error);
   }
 };
 
-// Initialize BroadcastChannel listener for cross-tab/browser synchronization
-if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-  const syncChannel = new BroadcastChannel('barberflow_sync_channel');
+// Listen for updates from other tabs
+if (syncChannel) {
   syncChannel.onmessage = (event) => {
     const { key, value } = event.data;
     if (key && localStorage.getItem(key) !== JSON.stringify(value)) {
